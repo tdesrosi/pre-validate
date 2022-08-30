@@ -16,7 +16,6 @@
 #
 # Precommit Hook for K8s Manifest Validation pre-CI/CD pipeline.
 # Janine Bariuan and Thomas Desrosiers
-# Using: kpt, kustomize, gator cli
 
 # Colors and Formatting
 bold=$(tput bold)
