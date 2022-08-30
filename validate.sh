@@ -23,6 +23,7 @@ bold=$(tput bold)
 normal=$(tput sgr0)
 green='\033[0;32m'
 red='\033[0;31m'
+yellow='\033[0;33m'
 nocolor='\033[0m'
 
 ########################################################
@@ -95,8 +96,9 @@ function check_dependency {
 
 	if command -v $1 &>/dev/null; then
 		echo "$1 exists in your path:"
-		printf "$PATH\n\n"
-		echo "Using preconfigured command, $1"
+		printf "$PATH\n"
+		printf "Using preconfigured command, $1\n\n"
+
 		update_path $1 "$1"
 		return
 	elif [[ -f .oss_dependencies/$1 ]]; then
@@ -126,15 +128,15 @@ echo $'Dependencies installed and properly configured.\n'
 
 # Get constraint, template, and k8s locations from dependency_info.txt
 export $(xargs <.oss_dependencies/user_config.txt)
-echo 'Templates location:' $TEMPLATES_LOCATION
-echo 'Constraints location:' $CONSTRAINTS_LOCATION
+printf "${yellow}Templates location: $TEMPLATES_LOCATION\n"
+printf "Constraints location: $CONSTRAINTS_LOCATION\n"
 
-if [[ -z $KUSTOMIZED_FILES ]]; then 
-	echo 'Using Kustomize: NO'
-	echo 'K8s Manifests location: <Not using Kustomize>'
-else 
-	echo 'Using Kustomize:' $KUSTOMIZED_FILES
-	echo 'K8s Manifests location:' $KUBERNETES_DIR
+if [[ -z $KUSTOMIZED_FILES ]]; then
+	printf "Using Kustomize: NO\n"
+	printf "K8s Manifests location: <Not using Kustomize>${nocolor}\n"
+else
+	printf "Using Kustomize: $KUSTOMIZED_FILES\n"
+	printf "K8s Manifests location: $KUBERNETES_DIR ${nocolor}\n"
 fi
 
 ########################################################
@@ -189,7 +191,6 @@ else
 	fi
 fi
 
-
 # Hydrate manifests if user is using Kustomize
 # If user isn't using Kustomize, use git diff to fill gator command
 # Validate in each situation
@@ -230,28 +231,27 @@ if [[ $KUSTOMIZED_FILES == "YES" ]]; then
 	# Cleaning hydrated manifests and building new Kustomization
 	rm -rf .oss_dependencies/.hydrated_manifests
 	# Hydrate manifests and apply kustomize overlays
-	mkdir -p .oss_dependencies/.hydrated_manifests/
-	$FULL_COMMAND_PATH_KUSTOMIZE build $KUBERNETES_DIR/$environment \
-		>.oss_dependencies/.hydrated_manifests/${environment}.yaml
+	mkdir -p .oss_dependencies/.hydrated_manifests
+	$FULL_COMMAND_PATH_KUSTOMIZE build $KUBERNETES_DIR/$environment >.oss_dependencies/.hydrated_manifests/kustomization.yaml
 	using_kustomize="true"
 	# Validates that all resources comply with all policies.
 	echo 'Validating against Policies'
-	pass_or_fail=$($FULL_COMMAND_PATH_GATOR test -f=.oss_dependencies/.hydrated_manifests/$environment.yaml -f=constraints-and-templates)
+	pass_or_fail=$($FULL_COMMAND_PATH_GATOR test -f=.oss_dependencies/.hydrated_manifests/kustomization.yaml -f=constraints-and-templates)
 	if [[ -z $pass_or_fail ]] || [[ $pass_or_fail == 'null' ]]; then
-		printf "\n> ${green}Congrats! No policy violations found.${nocolor}\n"
+		printf "\n${green}> Congrats! No policy violations found.${nocolor}\n"
 	else
 		found_violations=true
-		printf "\n> ${red}Violations found. See details below:\n\n${nocolor}" && echo $pass_or_fail
+		printf "\n${red}> Violations found in Kustomized File: .oss_dependencies/.hydrated_manifests/kustomization.yaml\n"
+		printf "> See details below:\n\n${nocolor}" && echo $pass_or_fail
 	fi
 else
 	# Loop through updated yamls and run gator test against them.
 	IFS=$'' read -d '' -r -a files_to_check <<<"$updated_yamls"
-	echo $files_to_check
 	for yaml in $files_to_check; do
 		printf "\n> Checking file: $yaml"
 		pass_or_fail=$($FULL_COMMAND_PATH_GATOR test -f=constraints-and-templates -f=$yaml)
 		if [[ -z $pass_or_fail ]] || [[ $pass_or_fail == 'null' ]]; then
-			printf "\n> ${green}Congrats! No policy violations found.${nocolor}\n"
+			printf "\n${green}> Congrats! No policy violations found.${nocolor}\n"
 		else
 			found_violations=true
 			printf "\n${red}> Violations found. See details below:\n\n${nocolor}" && echo $pass_or_fail
@@ -267,6 +267,15 @@ else
 	mv .temp constraints-and-templates
 fi
 
+# Ask user if they want to 
+# Open STDIN
+exec </dev/tty
 if [[ $found_violations = true ]]; then
-	err "Some resources have policy violations. Halting commit."
+	printf "\n${red}> Some resources have policy violations. Would you like to halt the commit and fix these files? [y/N]${nocolor}\n"
+	read -r -p "> " halt_commit
+	if [[ "$halt_commit" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+		err "Halting commit due to policy violations."
+	fi
 fi
+# Reclose STDIN
+exec <&-
